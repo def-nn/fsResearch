@@ -30,21 +30,30 @@ class FSProcessor:
     def define_kernel(self, kernel_type):
         if kernel_type == KERNEL_GAUSSIAN:
 
-            def gaussian(dist, dimensions, h):
+            def gaussian(dist, dimensions):
                 return pow(2 * math.pi, dimensions / -2) * math.exp(-0.5 * dist ** 2)
 
-            self.kernel = lambda dist, dimension: gaussian(dist, dimension)
+            self.kernel = lambda dist, dimension, h: gaussian(dist, dimension)
         elif kernel_type == KERNEL_EPANECHNIKOV:
 
             def epanechnikov(dist, dimension, h):
                 if dist < 1:
-                    # TODO norm const c - volume of the unit d-dimensional sphere
-                    return (dimension + 2) * (1 - dist ** 2) / 2
+                    c = 1
+                    if dimension == 2:
+                        c = math.pi * h ** 2
+                    elif dimension == 3:
+                        c = 4 * math.pi * h ** 3 / 3
+                    else:
+                        # TODO custom c
+                        pass
+
+                    return c * (dimension + 2) * (1 - dist ** 2) / 2
                 else: return 0
 
-            self.kernel = lambda dist, dimension: epanechnikov(dist, dimension)
+            self.kernel = lambda dist, dimension, h: epanechnikov(dist, dimension, h)
         else:
             raise ValueError("Kernel type is not understood")
+
 
     def load_img(self, file):
         self.img = np.float32(cv2.imread(file))
