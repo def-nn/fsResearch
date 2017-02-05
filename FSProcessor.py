@@ -88,6 +88,7 @@ class FSProcessor:
         y_matrix = np.zeros((self.img.shape[0], self.img.shape[1]))
 
         for y in range(self.img.shape[0]):
+            start = time.time()
             for x in range(self.img.shape[1]):
                 composite_kernels = np.ones((self.img.shape[0], self.img.shape[1]), dtype=np.float64)
 
@@ -118,16 +119,18 @@ class FSProcessor:
                 self.pdf[y, x] = np.sum(composite_kernels) / self.N
 
                 x_matrix += 1
+            print(y, time.time() - start)
             y_matrix += 1
             x_matrix = np.zeros((self.img.shape[0], self.img.shape[1]))
 
-    def write_results(self):
+    def write_results(self, filename):
+        res = open(filename, 'w')
         for y in range(self.img.shape[0]):
             for x in range(self.img.shape[1]):
-                print(y, x, self.pdf[y, x])
+                res.write('{0},{1},{2}\n'.format(x, y, self.pdf[y, x] * 100000000000000))
 
-    def load_img(self, file):
-        self.img = np.float32(cv2.imread(file))
+    def load_img(self, filename):
+        self.img = np.float32(cv2.imread(filename))
         self.img *= 1./255
 
         if len(self.img.shape) == 3:
