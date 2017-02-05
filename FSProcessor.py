@@ -89,7 +89,7 @@ class FSProcessor:
 
         for y in range(self.img.shape[0]):
             for x in range(self.img.shape[1]):
-                composite_kernels = np.ones((self.img.shape[0], self.img.shape[1]))
+                composite_kernels = np.ones((self.img.shape[0], self.img.shape[1]), dtype=np.float64)
 
                 for _type, dim, h in self.domains:
                     if _type == SPATIAL_DOMAIN:
@@ -119,6 +119,7 @@ class FSProcessor:
 
                 x_matrix += 1
             y_matrix += 1
+            x_matrix = np.zeros((self.img.shape[0], self.img.shape[1]))
 
     def write_results(self):
         for y in range(self.img.shape[0]):
