@@ -28,22 +28,27 @@ class FSProcessor:
             self.define_kernel(kernel)
 
         self.img = FSProcessor.undefined
+        self.is_color = FSProcessor.undefined
         self.N = FSProcessor.undefined
+        self.spatial_x = FSProcessor.undefined
+        self.spatial_y = FSProcessor.undefined
+
         self.pdf = FSProcessor.undefined
 
     def define_kernel(self, kernel_type):
         if kernel_type == KERNEL_GAUSSIAN:
 
             def gaussian(dist, dimensions):
-                return pow(2 * math.pi, dimensions / -2) * math.exp(-0.5 * dist ** 2)
+                return np.exp(np.square(dist) * -0.5) * pow(math.pi * 2, dimensions / -2)
 
             self.kernel = lambda dist, dimension, h: gaussian(dist, dimension)
             self.kernel_type = KERNEL_GAUSSIAN
         elif kernel_type == KERNEL_EPANECHNIKOV:
-            # Called only when dist < 1
             def epanechnikov(dist, dimension, h):
                 c = 1
-                if dimension == 2:
+                if dimension == 1:
+                    c = 2 * math.pi * h
+                elif dimension == 2:
                     c = math.pi * h ** 2
                 elif dimension == 3:
                     c = 4 * math.pi * h ** 3 / 3
@@ -51,57 +56,69 @@ class FSProcessor:
                     # TODO custom c
                     pass
 
-                return (dimension + 2) * (1 - dist ** 2) / (2 * c)
+                return (1 - np.square(dist)) * (dimension + 2) / (c * 2)
 
             self.kernel = lambda dist, dimension, h: epanechnikov(dist, dimension, h)
             self.kernel_type = KERNEL_EPANECHNIKOV
         else:
             raise ValueError("Kernel type is not understood")
 
-    def find_dist(self, coord1, coord2):
-        dist = 0
-        for axis1, axis2 in zip(coord1, coord2):
-            dist += (axis1 - axis2) ** 2
-        return math.sqrt(dist)
+    def find_dist(self, domain_type, center_matrix):
+        if domain_type == SPATIAL_DOMAIN:
+            return np.sqrt(
+                np.square(center_matrix[0] - self.spatial_x)
+                + np.square(center_matrix[1] - self.spatial_y)
+            )
 
-    def compute_kernel(self, coord1, coord2, domain_dim, domain_h):
-        kdf = 0
-        dist = self.find_dist(coord1, coord2)
-
-        if self.kernel_type == KERNEL_EPANECHNIKOV:
-            if dist < domain_h: kdf = self.kernel(dist / domain_h, domain_dim, domain_h)
-        else:
-            kdf = self.kernel(dist / domain_h, domain_dim, domain_h)
-
-        return kdf
+        elif domain_type == RANGE_DOMAIN:
+            if self.is_color:
+                return np.sqrt(
+                    np.square(center_matrix[0] - self.img[:, :, 0])
+                    + np.square(center_matrix[1] - self.img[:, :, 1])
+                    + np.square(center_matrix[2] - self.img[:, :, 2])
+                )
+            else:
+                return np.abs(center_matrix - self.img)
 
     def compute_pdf(self):
         print(self.N)
         self.pdf = np.empty((self.img.shape[0], self.img.shape[1]), dtype=np.float32)
 
+        x_matrix = np.zeros((self.img.shape[0], self.img.shape[1]))
+        y_matrix = np.zeros((self.img.shape[0], self.img.shape[1]))
+
         for y in range(self.img.shape[0]):
             for x in range(self.img.shape[1]):
-                start = time.time()
-                # TODO estimate normalized constant that makes K(x) integrate to one
-                kernel_sum = 0
+                composite_kernels = np.ones((self.img.shape[0], self.img.shape[1]))
 
-                for _y in range(self.img.shape[0]):
-                    for _x in range(self.img.shape[1]):
-                        composite_kernel = 1
+                for _type, dim, h in self.domains:
+                    if _type == SPATIAL_DOMAIN:
+                        dist = self.find_dist(_type, (x_matrix, y_matrix))
+                    elif _type == RANGE_DOMAIN:
+                        if self.is_color:
+                            L_channel = np.empty((self.img.shape[0], self.img.shape[1]))
+                            u_channel = np.empty((self.img.shape[0], self.img.shape[1]))
+                            v_channel = np.empty((self.img.shape[0], self.img.shape[1]))
 
-                        for _type, dim, h in self.domains:
-                            coord1, coord2 = {
-                                SPATIAL_DOMAIN: ((y,x), (_y, _x)),
-                                RANGE_DOMAIN: (self.img[y,x], self.img[_y, _x])
-                            }[_type]
+                            L_channel.fill(self.img[y, x, 0])
+                            u_channel.fill(self.img[y, x, 1])
+                            v_channel.fill(self.img[y, x, 2])
 
-                            composite_kernel *= self.compute_kernel(coord1, coord2, dim, h)
-                            composite_kernel /= h ** dim
+                            dist = self.find_dist(_type, (L_channel, u_channel, v_channel))
+                        else:
+                            dist = self.find_dist(_type,
+                                                  np.empty((self.img.shape[0], self.img.shape[1])).fill(self.img[y,x]))
 
-                        kernel_sum += composite_kernel
+                    if self.kernel_type == KERNEL_EPANECHNIKOV:
+                        dist[np.where(dist >= h)] = h
 
-                self.pdf[y,x] = kernel_sum / self.N
-                print(time.time() - start)
+                    composite_kernels *= self.kernel(dist / h, dim, h)
+                    composite_kernels /= h ** dim
+
+                self.pdf[y, x] = np.sum(composite_kernels) / self.N
+
+                x_matrix += 1
+            y_matrix += 1
 
     def write_results(self):
         for y in range(self.img.shape[0]):
@@ -111,9 +128,17 @@ class FSProcessor:
     def load_img(self, file):
         self.img = np.float32(cv2.imread(file))
         self.img *= 1./255
-        self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2Luv)
+
+        if len(self.img.shape) == 3:
+            self.img = cv2.cvtColor(self.img, cv2.COLOR_BGR2Luv)
+        else:
+            self.is_color = False
 
         self.N = self.img.shape[0] * self.img.shape[1]
+
+        self.spatial_x = np.tile(np.arange(self.img.shape[1]), (self.img.shape[0], 1))
+        self.spatial_y = np.repeat(np.arange(self.img.shape[0]).reshape((1,self.img.shape[0])),
+                                   self.img.shape[1], axis=1).reshape((self.img.shape[0], self.img.shape[1]))
 
     @staticmethod
     def get_undefined_object():
