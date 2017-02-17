@@ -3,8 +3,6 @@ import numpy as np
 import cv2
 import time
 import pymeanshift
-from PIL import Image
-import PIL
 
 
 KERNEL_GAUSSIAN = 0
@@ -13,11 +11,6 @@ KERNEL_EPANECHNIKOV = 1
 
 SPATIAL_DOMAIN = 0
 RANGE_DOMAIN = 1
-
-POST_DIM_NUM = 6
-POST_IND_SIZE = 0
-POST_IND_SPATIAL = 1
-POST_IND_RANGE = 3
 
 
 class FSProcessor:
@@ -42,98 +35,6 @@ class FSProcessor:
         self.spatial_y = FSProcessor.undefined
 
         self.pdf = FSProcessor.undefined
-
-    def find_local_max(self, filename):
-        original_img = cv2.imread(filename)
-        spatial_radius, range_radius, min_density = 8, 8, 100
-
-        res = np.copy(original_img)
-        segm_img, img_labels, num_labels = pymeanshift.segment(original_img, spatial_radius, range_radius, min_density)
-
-        cv2.imwrite('segm1.jpg', segm_img)
-
-        start = time.time()
-
-        # Remove boundary clusters
-        boundary_labels = set(img_labels[0, :]) | set(img_labels[-1, :]) | \
-                          set(img_labels[:, 0]) | set(img_labels[:, -1])
-
-        for label in boundary_labels:
-            res[np.where(img_labels == label)] = 0
-
-        local_maximum = np.empty((num_labels - len(boundary_labels), POST_DIM_NUM))
-
-        cluster_index = 0
-        for i in range(num_labels):
-            if i in boundary_labels: continue
-
-            cluster_coords = np.where(img_labels == i)
-
-            cluster_color = segm_img[cluster_coords[0][0], cluster_coords[1][0]]
-            cluster_size = len(cluster_coords[0])
-
-            mask = np.zeros((original_img.shape[0], original_img.shape[1]), dtype=np.uint8)
-            mask[cluster_coords] = 255
-
-            image, contours, hierarchy = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            M = cv2.moments(contours[0])
-
-            try:
-                cx = int(M['m10'] / M['m00'])
-                cy = int(M['m01'] / M['m00'])
-            except ZeroDivisionError:
-                continue
-
-            res[cy - 2: cy + 3, cx - 2: cx + 3] = [255, 0, 0]
-
-            local_maximum[cluster_index][POST_IND_SIZE:POST_IND_SPATIAL] = cluster_size
-            local_maximum[cluster_index][POST_IND_SPATIAL:POST_IND_RANGE] = (cy, cx)
-            local_maximum[cluster_index][POST_IND_RANGE:] = FSProcessor.RGB_to_Luv(*cluster_color)
-
-            print(local_maximum[cluster_index])
-
-            cluster_index += 1
-
-        print(time.time() - start)
-
-        cv2.imwrite('lm1.jpg', res)
-
-    @staticmethod
-    def RGB_to_Luv(b, g, r):
-        b /= 255
-        g /= 255
-        r /= 255
-
-        b = ((b + 0.055) / 1.055) ** 2.4 if b > 0.04045 else b / 12.92
-        g = ((g + 0.055) / 1.055) ** 2.4 if g > 0.04045 else g / 12.92
-        r = ((r + 0.055) / 1.055) ** 2.4 if r > 0.04045 else r / 12.92
-
-        b *= 100
-        g *= 100
-        r *= 100
-
-        x = r * 0.4124 + g * 0.3576 + b * 0.1805
-        y = r * 0.2126 + g * 0.7152 + b * 0.0722
-        z = r * 0.0193 + g * 0.1192 + b * 0.9505
-
-        u = (4 * x) / (x + (15 * y) + (3 * z))
-        v = (9 * y) / (x + (15 * y) + (3 * z))
-
-        y /= 100
-        y = y ** (1 / 3) if y > 0.008856 else (7.787 * y) + (16 / 116)
-
-        _x = 95.047
-        _y = 100.000
-        _y = 108.883
-
-        _u = (4 * _x) / (_x + (15 * _y) + (3 * _y))
-        _v = (9 * _y) / (_x + (15 * _y) + (3 * _y))
-
-        L = (116 * y) - 16
-        u = 13 * L * (u - _u)
-        v = 13 * L * (v - _v)
-
-        return L, u, v
 
     def define_kernel(self, kernel_type):
         if kernel_type == KERNEL_GAUSSIAN:
