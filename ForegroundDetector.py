@@ -6,7 +6,6 @@ import pymeanshift
 
 
 DIM_NUM = 6
-# IND_LABEL = 0
 IND_SIZE = 0
 IND_SPATIAL = 1
 IND_RANGE = 3
@@ -77,11 +76,15 @@ class FgdDetector:
         self.segm_img, self.img_labels, self.num_labels = pymeanshift.segment(self.original_img,
                                                                               hs, hr, min_density)
 
-        self.hs = math.sqrt(self.original_img.shape[0] ** 2 + self.original_img.shape[1] ** 2) / 4
-        self.hr = 8
+        self.hs = math.sqrt(self.original_img.shape[0] ** 2 + self.original_img.shape[1] ** 2)
+        self.hr = 300
 
         self.local_maxima = dict()
         self.contours = list()
+
+        self.connections = None
+        self.components = list()
+        self._connected = list()
 
     def find_local_max(self):
         start = time.time()
@@ -156,7 +159,6 @@ class FgdDetector:
 
     def get_neighbours(self):
         neighbours = {label: set() for label in self.local_maxima.keys()}
-        print(neighbours)
 
         for row in range(self.img_labels.shape[0] - 1):
             for col in range(self.img_labels.shape[1] - 1):
@@ -218,6 +220,10 @@ class FgdDetector:
     def merge_cluster(self):
         centroids = self.filter_centroids()
         neighbours = self.get_neighbours()
+        # print(centroids)
+        # print(neighbours)
+
+        edges = list()
 
         for centroid in centroids:
             color_ind1 = np.where(self.img_labels == centroid)
@@ -234,4 +240,39 @@ class FgdDetector:
                 )
                 dist /= (self.hs * self.hr)
 
-                print('{} to {}:\t{}'.format(centroid, bound_cluster, dist))
+                if dist < 0.01:
+                    edges.append((centroid, bound_cluster, dist))
+                    print('{} to {}:\t{}'.format(centroid, bound_cluster, dist))
+
+        self.connections = dict()
+
+        for e1, e2, dist in edges:
+            if e1 not in self.connections.keys(): self.connections[e1] = set()
+            self.connections[e1].add(e2)
+            if e2 not in self.connections.keys(): self.connections[e2] = set()
+            self.connections[e2].add(e1)
+
+        comp_ind = 0
+
+        for connection in self.connections.keys():
+            if connection in self._connected: continue
+
+            self.components.append(list())
+            self.components[comp_ind].append(connection)
+
+            self._connected.append(connection)
+
+            for deep_cnt in self.connections[connection]:
+                self.deep_search(comp_ind, deep_cnt)
+            comp_ind += 1
+
+    def deep_search(self, comp_ind, search_key):
+        if search_key in self._connected: return
+
+        self._connected.append(search_key)
+        self.components[comp_ind].append(search_key)
+
+        for deep_cnt in self.connections[search_key]:
+            self.deep_search(comp_ind, deep_cnt)
+
+
